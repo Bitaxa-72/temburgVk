@@ -29,6 +29,7 @@ class Termburg_VK_Promocodes_Plugin {
         add_action('admin_init', array($this, 'admin_init'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
         add_action('admin_post_termburg_vk_save_campaign', array($this, 'save_campaign'));
+        add_action('admin_post_termburg_vk_issue_promocode', array($this, 'issue_promocode'));
         add_action('admin_post_termburg_vk_cancel_promocode', array($this, 'cancel_promocode'));
         add_action('woocommerce_order_status_processing', array($this, 'mark_order_paid'), 20);
         add_action('woocommerce_order_status_completed', array($this, 'mark_order_paid'), 20);
@@ -117,6 +118,36 @@ class Termburg_VK_Promocodes_Plugin {
             'page' => 'termburg-vk-issued-codes',
             'cancelled' => '1',
         ), admin_url('admin.php')));
+        exit;
+    }
+
+    public function issue_promocode() {
+        if (!current_user_can('manage_options')) {
+            wp_die('Forbidden');
+        }
+
+        check_admin_referer('termburg_vk_issue_promocode');
+        $result = Termburg_VK_Promocodes_Campaigns::issue(
+            isset($_POST['campaign_id']) ? intval($_POST['campaign_id']) : 0,
+            isset($_POST['vk_user_id']) ? intval($_POST['vk_user_id']) : 0,
+            array(
+                'vk_first_name' => isset($_POST['vk_first_name']) ? wp_unslash($_POST['vk_first_name']) : '',
+                'vk_last_name' => isset($_POST['vk_last_name']) ? wp_unslash($_POST['vk_last_name']) : '',
+            )
+        );
+
+        $args = array(
+            'page' => 'termburg-vk-issued-codes',
+        );
+
+        if (is_wp_error($result)) {
+            $args['issue_error'] = $result->get_error_message();
+        } else {
+            $args['issued_code'] = $result['code'];
+            $args['issued_reused'] = !empty($result['reused']) ? '1' : '0';
+        }
+
+        wp_safe_redirect(add_query_arg($args, admin_url('admin.php')));
         exit;
     }
 
@@ -516,13 +547,53 @@ class Termburg_VK_Promocodes_Plugin {
         }
 
         $campaign_id = isset($_GET['campaign_id']) ? intval($_GET['campaign_id']) : 0;
+        Termburg_VK_Promocodes_Campaigns::ensure_default_campaign();
+        $campaigns = Termburg_VK_Promocodes_Campaigns::list_campaigns();
         $promocodes = Termburg_VK_Promocodes_Campaigns::list_promocodes($campaign_id);
         ?>
         <div class="wrap">
             <h1>Выданные промокоды</h1>
+            <?php if (isset($_GET['issued_code'])) : ?>
+                <div class="notice notice-success"><p><?php echo esc_html(isset($_GET['issued_reused']) && $_GET['issued_reused'] === '1' ? 'Промокод уже был выдан: ' : 'Промокод выдан: '); ?><strong><?php echo esc_html(wp_unslash($_GET['issued_code'])); ?></strong></p></div>
+            <?php endif; ?>
+            <?php if (isset($_GET['issue_error'])) : ?>
+                <div class="notice notice-error"><p><?php echo esc_html(wp_unslash($_GET['issue_error'])); ?></p></div>
+            <?php endif; ?>
             <?php if (isset($_GET['cancelled'])) : ?>
                 <div class="notice notice-success"><p>Промокод аннулирован.</p></div>
             <?php endif; ?>
+
+            <h2>Ручная выдача</h2>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                <?php wp_nonce_field('termburg_vk_issue_promocode'); ?>
+                <input type="hidden" name="action" value="termburg_vk_issue_promocode">
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row">Акция</th>
+                        <td>
+                            <select name="campaign_id" required>
+                                <?php foreach ($campaigns as $campaign) : ?>
+                                    <option value="<?php echo esc_attr($campaign['id']); ?>"><?php echo esc_html($campaign['name'] . ' #' . $campaign['id'] . ' · ' . ($campaign['status'] === 'active' ? 'включена' : 'выключена')); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">VK ID</th>
+                        <td><input type="number" min="1" class="regular-text" name="vk_user_id" required></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Имя VK</th>
+                        <td>
+                            <input type="text" class="regular-text" name="vk_first_name" placeholder="Имя">
+                            <input type="text" class="regular-text" name="vk_last_name" placeholder="Фамилия">
+                        </td>
+                    </tr>
+                </table>
+                <?php submit_button('Выдать промокод'); ?>
+            </form>
+
+            <h2>Список промокодов</h2>
             <table class="widefat striped">
                 <thead>
                     <tr>
