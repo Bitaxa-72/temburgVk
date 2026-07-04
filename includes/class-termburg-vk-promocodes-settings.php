@@ -28,7 +28,7 @@ class Termburg_VK_Promocodes_Settings {
             'mark_used_on' => 'paid',
             'allowed_kinds' => array('visit_ticket', 'adult_ticket', 'child_ticket'),
             'widget_enabled' => '1',
-            'widget_delay' => '8',
+            'widget_delay' => '5',
             'widget_title' => 'Промокод на первое посещение',
             'widget_text' => 'Подпишитесь на VK и получите персональный промокод.',
             'widget_button' => 'Получить во VK',
