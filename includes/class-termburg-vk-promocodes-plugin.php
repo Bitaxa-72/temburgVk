@@ -218,10 +218,14 @@ class Termburg_VK_Promocodes_Plugin {
         $option = Termburg_VK_Promocodes_Settings::OPTION;
         $callback_url = rest_url('termburg-promocodes/v1/vk/callback');
         $kinds = array(
-            'visit_ticket' => 'Входной билет',
+            'visit_ticket' => 'Все входные билеты',
             'adult_ticket' => 'Взрослый билет',
             'child_ticket' => 'Детский билет',
+            'child_under6_ticket' => 'Дети до 6 лет',
+            'pensioner_ticket' => 'Пенсионерский билет',
             'service' => 'Услуги',
+            'event' => 'Платные события расписания',
+            'photo_service' => 'Фотоуслуги',
             'certificate' => 'Сертификаты',
             'subscription' => 'Абонементы',
             'gift_box' => 'Подарочные боксы',
@@ -808,10 +812,14 @@ class Termburg_VK_Promocodes_Plugin {
 
     private function product_groups() {
         return array(
-            'visit_ticket' => 'Входной билет',
+            'visit_ticket' => 'Все входные билеты',
             'adult_ticket' => 'Взрослый билет',
             'child_ticket' => 'Детский билет',
+            'child_under6_ticket' => 'Дети до 6 лет',
+            'pensioner_ticket' => 'Пенсионерский билет',
             'service' => 'Услуги',
+            'event' => 'Платные события расписания',
+            'photo_service' => 'Фотоуслуги',
             'certificate' => 'Сертификаты',
             'subscription' => 'Абонементы',
             'gift_box' => 'Подарочные боксы',

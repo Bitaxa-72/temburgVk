@@ -74,18 +74,23 @@ class Termburg_VK_Promocodes_Coupons {
     }
 
     public static function validate($code, $line_items, $customer = array()) {
-        if (!class_exists('WC_Coupon')) {
-            return new WP_Error('woocommerce_missing', 'WooCommerce is not available');
-        }
-
         $settings = Termburg_VK_Promocodes_Settings::get();
         if ($settings['campaign_enabled'] !== '1') {
             return new WP_Error('campaign_disabled', 'Акция сейчас недоступна');
         }
 
-        $code = wc_format_coupon_code(sanitize_text_field($code));
+        $code = self::normalize_code($code);
         if ($code === '') {
             return new WP_Error('empty_code', 'Укажите промокод');
+        }
+
+        $promocode = Termburg_VK_Promocodes_DB::get_promocode_by_code($code);
+        if ($promocode) {
+            return self::validate_promocode_record($promocode, $line_items, $customer, $settings);
+        }
+
+        if (!class_exists('WC_Coupon')) {
+            return new WP_Error('woocommerce_missing', 'WooCommerce is not available');
         }
 
         $coupon_id = wc_get_coupon_id_by_code($code);
@@ -114,7 +119,7 @@ class Termburg_VK_Promocodes_Coupons {
 
         $line_items = self::normalize_line_items($line_items);
         $total = self::line_items_total($line_items);
-        $eligible_total = self::eligible_total($line_items);
+        $eligible_total = self::eligible_total($line_items, self::allowed_kinds());
         $min_total = (float) $settings['min_order_total'];
 
         if ($min_total > 0 && $total < $min_total) {
@@ -155,12 +160,21 @@ class Termburg_VK_Promocodes_Coupons {
             return new WP_Error('invalid_order', 'Invalid order');
         }
 
-        $coupon = new WC_Coupon($validation['coupon_id']);
-        if (!$coupon->get_id()) {
-            return new WP_Error('coupon_not_found', 'Coupon not found');
+        if (!empty($validation['coupon_id'])) {
+            $coupon = new WC_Coupon($validation['coupon_id']);
+            if (!$coupon->get_id()) {
+                return new WP_Error('coupon_not_found', 'Coupon not found');
+            }
+            $order->apply_coupon($coupon);
+        } elseif (class_exists('WC_Order_Item_Fee') && !empty($validation['discount_amount'])) {
+            $fee = new WC_Order_Item_Fee();
+            $fee->set_name('Промокод ' . sanitize_text_field($validation['code']));
+            $fee->set_amount(-1 * abs((float) $validation['discount_amount']));
+            $fee->set_total(-1 * abs((float) $validation['discount_amount']));
+            $fee->set_tax_status('none');
+            $order->add_item($fee);
         }
 
-        $order->apply_coupon($coupon);
         $order->update_meta_data('_termburg_vk_promo_code', $validation['code']);
         $order->update_meta_data('_termburg_vk_user_id', intval($validation['vk_user_id']));
         $order->update_meta_data('_termburg_vk_coupon_id', intval($validation['coupon_id']));
@@ -201,6 +215,10 @@ class Termburg_VK_Promocodes_Coupons {
             $price = isset($item['price']) ? round((float) $item['price'], 2) : 0;
             $quantity = max(1, intval(isset($item['quantity']) ? $item['quantity'] : 1));
             $kind = sanitize_key(isset($item['kind']) ? $item['kind'] : 'product');
+            $product_key = sanitize_text_field(isset($item['productKey']) ? $item['productKey'] : (isset($item['product_key']) ? $item['product_key'] : ''));
+            $product_group = sanitize_key(isset($item['productGroup']) ? $item['productGroup'] : (isset($item['product_group']) ? $item['product_group'] : ''));
+            $source = sanitize_key(isset($item['source']) ? $item['source'] : '');
+            $source_id = sanitize_text_field(isset($item['sourceId']) ? $item['sourceId'] : (isset($item['source_id']) ? $item['source_id'] : ''));
 
             if ($name === '' || $price <= 0) {
                 continue;
@@ -211,6 +229,10 @@ class Termburg_VK_Promocodes_Coupons {
                 'price' => $price,
                 'quantity' => $quantity,
                 'kind' => $kind ?: 'product',
+                'product_key' => $product_key,
+                'product_group' => $product_group,
+                'source' => $source,
+                'source_id' => $source_id,
             );
         }
 
@@ -269,12 +291,12 @@ class Termburg_VK_Promocodes_Coupons {
         return round($total, 2);
     }
 
-    private static function eligible_total($items) {
-        $allowed = self::allowed_kinds();
+    private static function eligible_total($items, $allowed = array()) {
+        $allowed = empty($allowed) ? self::allowed_kinds() : array_values(array_filter(array_map('sanitize_key', $allowed)));
         $total = 0;
 
         foreach ($items as $item) {
-            if (in_array($item['kind'], $allowed, true)) {
+            if (self::line_item_allowed($item, $allowed)) {
                 $total += (float) $item['price'] * (int) $item['quantity'];
             }
         }
@@ -283,12 +305,98 @@ class Termburg_VK_Promocodes_Coupons {
     }
 
     private static function calculate_discount($coupon, $eligible_total) {
-        $amount = (float) $coupon->get_amount();
-        if ($coupon->get_discount_type() === 'percent') {
+        return self::calculate_discount_amount($coupon->get_discount_type(), (float) $coupon->get_amount(), $eligible_total);
+    }
+
+    private static function validate_promocode_record($promocode, $line_items, $customer, $settings) {
+        $campaign = Termburg_VK_Promocodes_Campaigns::get_campaign(intval($promocode['campaign_id']));
+        if (!$campaign || $campaign['status'] !== 'active') {
+            return new WP_Error('campaign_disabled', 'Акция сейчас недоступна');
+        }
+
+        if ($promocode['status'] === 'cancelled') {
+            return new WP_Error('cancelled', 'Промокод аннулирован');
+        }
+
+        if (!empty($promocode['expires_at']) && strtotime($promocode['expires_at']) < time()) {
+            return new WP_Error('expired', 'Промокод истек');
+        }
+
+        if (intval($promocode['usage_count']) >= intval($promocode['usage_limit'])) {
+            return new WP_Error('used', 'Промокод уже использован');
+        }
+
+        $line_items = self::normalize_line_items($line_items);
+        $total = self::line_items_total($line_items);
+        $allowed = json_decode(isset($promocode['product_groups']) ? $promocode['product_groups'] : '[]', true);
+        if (!is_array($allowed) || empty($allowed)) {
+            $allowed = Termburg_VK_Promocodes_Campaigns::product_groups($campaign);
+        }
+        $eligible_total = self::eligible_total($line_items, $allowed);
+        $min_total = (float) $settings['min_order_total'];
+
+        if ($min_total > 0 && $total < $min_total) {
+            return new WP_Error('min_total', 'Сумма заказа меньше минимальной для промокода');
+        }
+
+        if ($eligible_total <= 0) {
+            return new WP_Error('kind_not_allowed', 'Промокод нельзя применить к выбранным товарам');
+        }
+
+        if ($settings['first_visit_only'] === '1' && self::customer_has_paid_orders($customer)) {
+            return new WP_Error('not_first_visit', 'Промокод действует только на первое посещение');
+        }
+
+        $discount = self::calculate_discount_amount($promocode['discount_type'], (float) $promocode['discount_value'], $eligible_total);
+        if ($discount <= 0) {
+            return new WP_Error('zero_discount', 'Промокод не дает скидку для этого заказа');
+        }
+
+        return array(
+            'valid' => true,
+            'code' => $promocode['promo_code'],
+            'coupon_id' => 0,
+            'promocode_id' => intval($promocode['id']),
+            'discount_type' => $promocode['discount_type'],
+            'discount_value' => (float) $promocode['discount_value'],
+            'discount_amount' => $discount,
+            'total_before_discount' => $total,
+            'eligible_total' => $eligible_total,
+            'total_after_discount' => max(0, round($total - $discount, 2)),
+            'expires_at' => $promocode['expires_at'],
+            'vk_user_id' => intval($promocode['vk_user_id']),
+            'campaign_id' => (string) $promocode['campaign_id'],
+        );
+    }
+
+    private static function line_item_allowed($item, $allowed) {
+        $kind = sanitize_key(isset($item['kind']) ? $item['kind'] : 'product');
+        $group = sanitize_key(isset($item['product_group']) ? $item['product_group'] : '');
+        $visit_kinds = array('adult_ticket', 'child_ticket', 'child_under6_ticket', 'pensioner_ticket', 'visit_ticket');
+
+        if (in_array($kind, $allowed, true)) {
+            return true;
+        }
+
+        if ($group !== '' && in_array($group, $allowed, true)) {
+            return true;
+        }
+
+        return in_array('visit_ticket', $allowed, true) && in_array($kind, $visit_kinds, true);
+    }
+
+    private static function calculate_discount_amount($discount_type, $amount, $eligible_total) {
+        $amount = (float) $amount;
+        if ($discount_type === 'percent') {
             return round($eligible_total * min(100, max(0, $amount)) / 100, 2);
         }
 
         return round(min($eligible_total, max(0, $amount)), 2);
+    }
+
+    private static function normalize_code($code) {
+        $code = sanitize_text_field($code);
+        return function_exists('wc_format_coupon_code') ? wc_format_coupon_code($code) : strtoupper($code);
     }
 
     private static function customer_has_paid_orders($customer) {

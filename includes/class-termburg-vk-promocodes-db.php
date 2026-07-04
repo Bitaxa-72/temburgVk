@@ -5,7 +5,7 @@ if (!defined('ABSPATH')) {
 }
 
 class Termburg_VK_Promocodes_DB {
-    const VERSION = '2';
+    const VERSION = '3';
     const VERSION_OPTION = 'termburg_vk_promocodes_db_version';
 
     public static function users_table() {
@@ -165,6 +165,11 @@ class Termburg_VK_Promocodes_DB {
         return $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . self::users_table() . ' WHERE promo_code = %s', $code), ARRAY_A);
     }
 
+    public static function get_promocode_by_code($code) {
+        global $wpdb;
+        return $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . self::promocodes_table() . ' WHERE promo_code = %s LIMIT 1', sanitize_text_field($code)), ARRAY_A);
+    }
+
     public static function upsert_user($vk_user_id, $data = array()) {
         global $wpdb;
 
@@ -194,6 +199,19 @@ class Termburg_VK_Promocodes_DB {
             'promo_used_at' => current_time('mysql'),
             'updated_at' => current_time('mysql'),
         ), $where);
+
+        $promo_where = $code !== '' ? array('promo_code' => sanitize_text_field($code)) : array();
+        if (!empty($promo_where)) {
+            $promocode = self::get_promocode_by_code($code);
+            $usage_count = $promocode ? intval($promocode['usage_count']) + 1 : 1;
+            $usage_limit = $promocode ? max(1, intval($promocode['usage_limit'])) : 1;
+            $wpdb->update(self::promocodes_table(), array(
+                'used_at' => current_time('mysql'),
+                'usage_count' => $usage_count,
+                'status' => $usage_count >= $usage_limit ? 'used' : 'active',
+                'updated_at' => current_time('mysql'),
+            ), $promo_where);
+        }
     }
 
     public static function event_seen($event_id) {

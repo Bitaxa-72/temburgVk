@@ -103,7 +103,7 @@ class Termburg_VK_Promocodes_Campaigns {
                 return new WP_Error('promocode_cancelled', 'Промокод по этой акции был аннулирован');
             }
 
-            if (!empty($existing['used_at']) || intval($existing['usage_count']) >= intval($existing['usage_limit'])) {
+            if (intval($existing['usage_count']) >= intval($existing['usage_limit'])) {
                 return new WP_Error('promocode_already_used', 'Промокод по этой акции уже был использован');
             }
 
@@ -198,7 +198,7 @@ class Termburg_VK_Promocodes_Campaigns {
         $settings = Termburg_VK_Promocodes_Settings::get();
         $input = is_array($input) ? $input : array();
         $product_groups = isset($input['product_groups']) && is_array($input['product_groups']) ? $input['product_groups'] : array();
-        $allowed_groups = array('visit_ticket', 'adult_ticket', 'child_ticket', 'service', 'certificate', 'subscription', 'gift_box', 'merch', 'product');
+        $allowed_groups = array('visit_ticket', 'adult_ticket', 'child_ticket', 'child_under6_ticket', 'pensioner_ticket', 'service', 'event', 'photo_service', 'certificate', 'subscription', 'gift_box', 'merch', 'product');
         $name = sanitize_text_field(isset($input['name']) ? $input['name'] : '');
         $slug = sanitize_title(isset($input['slug']) ? $input['slug'] : '');
 
@@ -251,7 +251,7 @@ class Termburg_VK_Promocodes_Campaigns {
             return 'Аннулирован';
         }
 
-        if (!empty($promocode['used_at']) || intval($promocode['usage_count']) >= intval($promocode['usage_limit'])) {
+        if (intval($promocode['usage_count']) >= intval($promocode['usage_limit'])) {
             return 'Применен';
         }
 

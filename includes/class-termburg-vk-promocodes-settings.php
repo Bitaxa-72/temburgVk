@@ -26,7 +26,7 @@ class Termburg_VK_Promocodes_Settings {
             'reissue_policy' => 'never',
             'reissue_days' => '365',
             'mark_used_on' => 'paid',
-            'allowed_kinds' => array('visit_ticket', 'adult_ticket', 'child_ticket'),
+            'allowed_kinds' => array('visit_ticket'),
             'widget_enabled' => '1',
             'widget_delay' => '5',
             'widget_title' => 'Промокод на первое посещение',
@@ -73,7 +73,7 @@ class Termburg_VK_Promocodes_Settings {
     public static function sanitize($input) {
         $defaults = self::defaults();
         $input = is_array($input) ? $input : array();
-        $allowed_kinds = array('visit_ticket', 'adult_ticket', 'child_ticket', 'service', 'certificate', 'subscription', 'gift_box', 'merch', 'product');
+        $allowed_kinds = array('visit_ticket', 'adult_ticket', 'child_ticket', 'child_under6_ticket', 'pensioner_ticket', 'service', 'event', 'photo_service', 'certificate', 'subscription', 'gift_box', 'merch', 'product');
         $out = array();
 
         foreach ($defaults as $key => $default) {
