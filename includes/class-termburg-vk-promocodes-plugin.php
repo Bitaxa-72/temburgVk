@@ -28,6 +28,7 @@ class Termburg_VK_Promocodes_Plugin {
         add_action('admin_menu', array($this, 'admin_menu'));
         add_action('admin_init', array($this, 'admin_init'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
+        add_action('admin_post_termburg_vk_save_bot_settings', array($this, 'save_bot_settings'));
         add_action('admin_post_termburg_vk_save_campaign', array($this, 'save_campaign'));
         add_action('admin_post_termburg_vk_issue_promocode', array($this, 'issue_promocode'));
         add_action('admin_post_termburg_vk_cancel_promocode', array($this, 'cancel_promocode'));
@@ -44,6 +45,15 @@ class Termburg_VK_Promocodes_Plugin {
             array($this, 'render_settings_page'),
             'dashicons-megaphone',
             58
+        );
+
+        add_submenu_page(
+            'termburg-vk-promocodes',
+            'Бот',
+            'Бот',
+            'manage_options',
+            'termburg-vk-bot',
+            array($this, 'render_bot_page')
         );
 
         add_submenu_page(
@@ -101,6 +111,54 @@ class Termburg_VK_Promocodes_Plugin {
         wp_safe_redirect(add_query_arg(array(
             'page' => 'termburg-vk-campaigns',
             'campaign_id' => $campaign_id,
+            'updated' => '1',
+        ), admin_url('admin.php')));
+        exit;
+    }
+
+    public function save_bot_settings() {
+        if (!current_user_can('manage_options')) {
+            wp_die('Forbidden');
+        }
+
+        check_admin_referer('termburg_vk_save_bot_settings');
+        $current = Termburg_VK_Promocodes_Settings::get();
+        $input = isset($_POST['bot']) && is_array($_POST['bot']) ? wp_unslash($_POST['bot']) : array();
+        $fields = array(
+            'vk_group_id',
+            'vk_group_slug',
+            'vk_token',
+            'vk_secret',
+            'vk_confirmation',
+            'vk_api_version',
+            'bot_intro',
+            'bot_consent_text',
+            'bot_need_subscription',
+            'bot_code_message',
+            'bot_existing_code_message',
+            'bot_issue_error_message',
+            'bot_no_active_campaign_message',
+            'bot_unsubscribe_message',
+            'bot_button_subscribe',
+            'bot_button_consent',
+            'bot_button_check_subscription',
+            'bot_button_continue',
+            'continue_url',
+            'consent_text_version',
+            'vk_timeout',
+            'vk_retry_limit',
+            'log_mode',
+        );
+
+        foreach ($fields as $field) {
+            if (array_key_exists($field, $input)) {
+                $current[$field] = $input[$field];
+            }
+        }
+
+        Termburg_VK_Promocodes_Settings::update($current);
+        wp_safe_redirect(add_query_arg(array(
+            'page' => 'termburg-vk-bot',
             'updated' => '1',
         ), admin_url('admin.php')));
         exit;
@@ -307,30 +365,6 @@ class Termburg_VK_Promocodes_Plugin {
                     </tr>
                 </table>
 
-                <h2>Тексты бота</h2>
-                <table class="form-table" role="presentation">
-                    <?php
-                    $text_fields = array(
-                        'bot_intro' => 'Первое сообщение',
-                        'bot_consent_text' => 'Текст согласия',
-                        'bot_need_subscription' => 'Нет подписки',
-                        'bot_code_message' => 'Промокод создан',
-                        'bot_existing_code_message' => 'Промокод уже есть',
-                        'bot_unsubscribe_message' => 'Отписка',
-                    );
-                    foreach ($text_fields as $field => $label) :
-                    ?>
-                        <tr>
-                            <th scope="row"><?php echo esc_html($label); ?></th>
-                            <td><textarea class="large-text" rows="2" name="<?php echo esc_attr($option); ?>[<?php echo esc_attr($field); ?>]"><?php echo esc_textarea($settings[$field]); ?></textarea></td>
-                        </tr>
-                    <?php endforeach; ?>
-                    <tr>
-                        <th scope="row">Версия текста согласия</th>
-                        <td><input type="text" class="small-text" name="<?php echo esc_attr($option); ?>[consent_text_version]" value="<?php echo esc_attr($settings['consent_text_version']); ?>"></td>
-                    </tr>
-                </table>
-
                 <h2>Логи и VK API</h2>
                 <table class="form-table" role="presentation">
                     <tr>
@@ -354,6 +388,160 @@ class Termburg_VK_Promocodes_Plugin {
                 </table>
 
                 <?php submit_button(); ?>
+            </form>
+        </div>
+        <?php
+    }
+
+    public function render_bot_page() {
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+
+        $settings = Termburg_VK_Promocodes_Settings::get();
+        $callback_url = rest_url('termburg-promocodes/v1/vk/callback');
+        $issue_url = rest_url('termburg-promocodes/v1/promocodes/issue');
+        $config_url = rest_url('termburg-promocodes/v1/bot/config');
+        $consent_url = rest_url('termburg-promocodes/v1/bot/consent');
+        $status_url = rest_url('termburg-promocodes/v1/bot/user-status');
+        $active_campaign = Termburg_VK_Promocodes_Campaigns::get_active_campaign();
+        ?>
+        <div class="wrap">
+            <h1>VK-бот</h1>
+            <?php if (isset($_GET['updated'])) : ?>
+                <div class="notice notice-success"><p>Настройки бота сохранены.</p></div>
+            <?php endif; ?>
+            <h2>Служебные URL</h2>
+            <table class="form-table" role="presentation">
+                <tr>
+                    <th scope="row">Callback URL</th>
+                    <td><input type="text" class="large-text" readonly value="<?php echo esc_attr($callback_url); ?>"></td>
+                </tr>
+                <tr>
+                    <th scope="row">Выдача промокода</th>
+                    <td><input type="text" class="large-text" readonly value="<?php echo esc_attr($issue_url); ?>"></td>
+                </tr>
+                <tr>
+                    <th scope="row">Конфиг бота</th>
+                    <td><input type="text" class="large-text" readonly value="<?php echo esc_attr($config_url); ?>"></td>
+                </tr>
+                <tr>
+                    <th scope="row">Сохранить согласие</th>
+                    <td><input type="text" class="large-text" readonly value="<?php echo esc_attr($consent_url); ?>"></td>
+                </tr>
+                <tr>
+                    <th scope="row">Статус пользователя</th>
+                    <td><input type="text" class="large-text" readonly value="<?php echo esc_attr($status_url); ?>"></td>
+                </tr>
+                <tr>
+                    <th scope="row">Активная акция</th>
+                    <td><?php echo $active_campaign ? esc_html($active_campaign['name'] . ' #' . $active_campaign['id']) : 'Нет активной акции'; ?></td>
+                </tr>
+            </table>
+
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                <?php wp_nonce_field('termburg_vk_save_bot_settings'); ?>
+                <input type="hidden" name="action" value="termburg_vk_save_bot_settings">
+
+                <h2>VK подключение</h2>
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row">VK group ID</th>
+                        <td><input type="text" class="regular-text" name="bot[vk_group_id]" value="<?php echo esc_attr($settings['vk_group_id']); ?>"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">VK group slug</th>
+                        <td><input type="text" class="regular-text" name="bot[vk_group_slug]" value="<?php echo esc_attr($settings['vk_group_slug']); ?>"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">VK access token</th>
+                        <td><input type="password" class="regular-text" name="bot[vk_token]" value="<?php echo esc_attr($settings['vk_token']); ?>" autocomplete="new-password"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">VK secret key</th>
+                        <td><input type="password" class="regular-text" name="bot[vk_secret]" value="<?php echo esc_attr($settings['vk_secret']); ?>" autocomplete="new-password"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">VK confirmation string</th>
+                        <td><input type="text" class="regular-text" name="bot[vk_confirmation]" value="<?php echo esc_attr($settings['vk_confirmation']); ?>"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">VK API version</th>
+                        <td><input type="text" class="small-text" name="bot[vk_api_version]" value="<?php echo esc_attr($settings['vk_api_version']); ?>"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">VK timeout</th>
+                        <td><input type="number" min="3" max="30" class="small-text" name="bot[vk_timeout]" value="<?php echo esc_attr($settings['vk_timeout']); ?>"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">VK retry limit</th>
+                        <td><input type="number" min="0" max="3" class="small-text" name="bot[vk_retry_limit]" value="<?php echo esc_attr($settings['vk_retry_limit']); ?>"></td>
+                    </tr>
+                </table>
+
+                <h2>Сценарий и тексты</h2>
+                <table class="form-table" role="presentation">
+                    <?php
+                    $text_fields = array(
+                        'bot_intro' => 'Первое сообщение',
+                        'bot_consent_text' => 'Текст согласия',
+                        'bot_need_subscription' => 'Нет подписки',
+                        'bot_code_message' => 'Промокод создан',
+                        'bot_existing_code_message' => 'Промокод уже есть',
+                        'bot_issue_error_message' => 'Ошибка выдачи',
+                        'bot_no_active_campaign_message' => 'Нет активной акции',
+                        'bot_unsubscribe_message' => 'Отписка',
+                    );
+                    foreach ($text_fields as $field => $label) :
+                    ?>
+                        <tr>
+                            <th scope="row"><?php echo esc_html($label); ?></th>
+                            <td><textarea class="large-text" rows="2" name="bot[<?php echo esc_attr($field); ?>]"><?php echo esc_textarea($settings[$field]); ?></textarea></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <tr>
+                        <th scope="row">Версия согласия</th>
+                        <td><input type="text" class="small-text" name="bot[consent_text_version]" value="<?php echo esc_attr($settings['consent_text_version']); ?>"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Продолжить покупки URL</th>
+                        <td><input type="url" class="regular-text" name="bot[continue_url]" value="<?php echo esc_attr($settings['continue_url']); ?>"></td>
+                    </tr>
+                </table>
+
+                <h2>Кнопки бота</h2>
+                <table class="form-table" role="presentation">
+                    <?php
+                    $button_fields = array(
+                        'bot_button_subscribe' => 'Подписаться на сообщество',
+                        'bot_button_consent' => 'Согласие на сообщения',
+                        'bot_button_check_subscription' => 'Проверить подписку',
+                        'bot_button_continue' => 'Продолжить покупки',
+                    );
+                    foreach ($button_fields as $field => $label) :
+                    ?>
+                        <tr>
+                            <th scope="row"><?php echo esc_html($label); ?></th>
+                            <td><input type="text" class="regular-text" name="bot[<?php echo esc_attr($field); ?>]" value="<?php echo esc_attr($settings[$field]); ?>"></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </table>
+
+                <h2>Логи</h2>
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row">Режим логирования</th>
+                        <td>
+                            <select name="bot[log_mode]">
+                                <option value="off" <?php selected($settings['log_mode'], 'off'); ?>>Выключено</option>
+                                <option value="errors" <?php selected($settings['log_mode'], 'errors'); ?>>Ошибки</option>
+                                <option value="all" <?php selected($settings['log_mode'], 'all'); ?>>Все события</option>
+                            </select>
+                        </td>
+                    </tr>
+                </table>
+
+                <?php submit_button('Сохранить настройки бота'); ?>
             </form>
         </div>
         <?php
@@ -509,30 +697,6 @@ class Termburg_VK_Promocodes_Plugin {
                     <tr>
                         <th scope="row">Продолжить покупки URL</th>
                         <td><input type="url" class="regular-text" name="campaign[continue_url]" value="<?php echo esc_attr($form['continue_url']); ?>"></td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Версия согласия</th>
-                        <td><input type="text" class="small-text" name="campaign[consent_text_version]" value="<?php echo esc_attr($form['consent_text_version']); ?>"></td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Первое сообщение</th>
-                        <td><textarea class="large-text" rows="2" name="campaign[bot_intro]"><?php echo esc_textarea($form['bot_intro']); ?></textarea></td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Текст согласия</th>
-                        <td><textarea class="large-text" rows="2" name="campaign[bot_consent_text]"><?php echo esc_textarea($form['bot_consent_text']); ?></textarea></td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Нет подписки</th>
-                        <td><textarea class="large-text" rows="2" name="campaign[bot_need_subscription]"><?php echo esc_textarea($form['bot_need_subscription']); ?></textarea></td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Новый промокод</th>
-                        <td><textarea class="large-text" rows="2" name="campaign[bot_code_message]"><?php echo esc_textarea($form['bot_code_message']); ?></textarea></td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Уже выдавался</th>
-                        <td><textarea class="large-text" rows="2" name="campaign[bot_existing_code_message]"><?php echo esc_textarea($form['bot_existing_code_message']); ?></textarea></td>
                     </tr>
                 </table>
                 <?php submit_button('Сохранить акцию'); ?>

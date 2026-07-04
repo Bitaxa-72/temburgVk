@@ -37,7 +37,13 @@ class Termburg_VK_Promocodes_Settings {
             'bot_need_subscription' => 'Остался один шаг: подпишитесь на сообщество, и я пришлю промокод.',
             'bot_code_message' => 'Ваш промокод: {code}. Используйте его на сайте при покупке.',
             'bot_existing_code_message' => 'Ваш активный промокод: {code}.',
+            'bot_issue_error_message' => 'Не получилось выдать промокод: {message}',
+            'bot_no_active_campaign_message' => 'Сейчас нет активной акции для выдачи промокода.',
             'bot_unsubscribe_message' => 'Вы отписались от рекламных сообщений.',
+            'bot_button_subscribe' => 'Подписаться на сообщество',
+            'bot_button_consent' => 'Согласен получать сообщения',
+            'bot_button_check_subscription' => 'Проверить подписку',
+            'bot_button_continue' => 'Продолжить покупки',
             'continue_url' => 'https://termburg.ru/',
             'consent_text_version' => '1',
             'log_mode' => 'errors',
@@ -80,7 +86,7 @@ class Termburg_VK_Promocodes_Settings {
             $value = array_key_exists($key, $input) ? $input[$key] : $default;
             if (in_array($key, array('vk_token', 'vk_secret', 'vk_confirmation'), true)) {
                 $out[$key] = sanitize_text_field($value);
-            } elseif (in_array($key, array('bot_intro', 'bot_consent_text', 'bot_need_subscription', 'bot_code_message', 'bot_existing_code_message', 'bot_unsubscribe_message', 'widget_text'), true)) {
+            } elseif (in_array($key, array('bot_intro', 'bot_consent_text', 'bot_need_subscription', 'bot_code_message', 'bot_existing_code_message', 'bot_issue_error_message', 'bot_no_active_campaign_message', 'bot_unsubscribe_message', 'widget_text'), true)) {
                 $out[$key] = sanitize_textarea_field($value);
             } elseif (in_array($key, array('continue_url'), true)) {
                 $out[$key] = esc_url_raw($value);
@@ -113,6 +119,12 @@ class Termburg_VK_Promocodes_Settings {
         $out['campaign_enabled'] = empty($out['campaign_enabled']) ? '0' : '1';
         $out['widget_enabled'] = empty($out['widget_enabled']) ? '0' : '1';
         $out['first_visit_only'] = empty($out['first_visit_only']) ? '0' : '1';
+
+        foreach (array('bot_button_subscribe', 'bot_button_consent', 'bot_button_check_subscription', 'bot_button_continue') as $button_key) {
+            if (trim((string) $out[$button_key]) === '') {
+                $out[$button_key] = $defaults[$button_key];
+            }
+        }
 
         return $out;
     }

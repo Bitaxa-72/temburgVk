@@ -51,10 +51,9 @@ class Termburg_VK_Promocodes_VK {
     }
 
     public static function save_consent($vk_user_id) {
-        $campaign = Termburg_VK_Promocodes_Campaigns::get_active_campaign();
         Termburg_VK_Promocodes_DB::upsert_user($vk_user_id, array(
             'marketing_consent_at' => current_time('mysql'),
-            'marketing_consent_text_version' => $campaign ? $campaign['consent_text_version'] : Termburg_VK_Promocodes_Settings::get('consent_text_version', '1'),
+            'marketing_consent_text_version' => Termburg_VK_Promocodes_Settings::get('consent_text_version', '1'),
             'marketing_revoked_at' => null,
             'messages_allowed' => 1,
         ));
@@ -69,10 +68,7 @@ class Termburg_VK_Promocodes_VK {
 
     public static function send_intro($vk_user_id) {
         $settings = Termburg_VK_Promocodes_Settings::get();
-        $campaign = Termburg_VK_Promocodes_Campaigns::get_active_campaign();
-        $intro = $campaign && $campaign['bot_intro'] !== '' ? $campaign['bot_intro'] : $settings['bot_intro'];
-        $consent = $campaign && $campaign['bot_consent_text'] !== '' ? $campaign['bot_consent_text'] : $settings['bot_consent_text'];
-        $message = trim($intro . "\n\n" . $consent);
+        $message = trim($settings['bot_intro'] . "\n\n" . $settings['bot_consent_text']);
         self::send_message($vk_user_id, $message, self::default_keyboard());
     }
 
@@ -94,18 +90,24 @@ class Termburg_VK_Promocodes_VK {
         }
 
         if (!$is_member) {
-            $message = $campaign && $campaign['bot_need_subscription'] !== '' ? $campaign['bot_need_subscription'] : $settings['bot_need_subscription'];
-            self::send_message($vk_user_id, $message, self::default_keyboard());
+            self::send_message($vk_user_id, $settings['bot_need_subscription'], self::default_keyboard());
+            return;
+        }
+
+        if (!$campaign || $campaign['status'] !== 'active') {
+            self::send_message($vk_user_id, $settings['bot_no_active_campaign_message'], self::default_keyboard());
             return;
         }
 
         $result = Termburg_VK_Promocodes_Campaigns::issue($campaign ? intval($campaign['id']) : 0, $vk_user_id);
         if (is_wp_error($result)) {
-            self::send_message($vk_user_id, $result->get_error_message(), self::default_keyboard());
+            $message = str_replace('{message}', $result->get_error_message(), $settings['bot_issue_error_message']);
+            self::send_message($vk_user_id, $message, self::default_keyboard());
             return;
         }
 
-        self::send_message($vk_user_id, $result['message'], self::continue_keyboard($campaign));
+        $template = !empty($result['reused']) ? $settings['bot_existing_code_message'] : $settings['bot_code_message'];
+        self::send_message($vk_user_id, str_replace('{code}', $result['code'], $template), self::continue_keyboard($campaign));
     }
 
     public static function is_group_member($vk_user_id) {
@@ -192,7 +194,7 @@ class Termburg_VK_Promocodes_VK {
                         'action' => array(
                             'type' => 'open_link',
                             'link' => 'https://vk.com/' . rawurlencode($group_slug),
-                            'label' => 'Подписаться на сообщество',
+                            'label' => $settings['bot_button_subscribe'],
                         ),
                     ),
                 ),
@@ -200,7 +202,7 @@ class Termburg_VK_Promocodes_VK {
                     array(
                         'action' => array(
                             'type' => 'callback',
-                            'label' => 'Согласен получать сообщения',
+                            'label' => $settings['bot_button_consent'],
                             'payload' => wp_json_encode(array('command' => 'consent'), JSON_UNESCAPED_UNICODE),
                         ),
                         'color' => 'positive',
@@ -210,7 +212,7 @@ class Termburg_VK_Promocodes_VK {
                     array(
                         'action' => array(
                             'type' => 'callback',
-                            'label' => 'Проверить подписку',
+                            'label' => $settings['bot_button_check_subscription'],
                             'payload' => wp_json_encode(array('command' => 'check_subscription'), JSON_UNESCAPED_UNICODE),
                         ),
                         'color' => 'primary',
@@ -221,7 +223,8 @@ class Termburg_VK_Promocodes_VK {
     }
 
     private static function continue_keyboard($campaign = null) {
-        $url = $campaign && !empty($campaign['continue_url']) ? $campaign['continue_url'] : Termburg_VK_Promocodes_Settings::get('continue_url', home_url('/'));
+        $settings = Termburg_VK_Promocodes_Settings::get();
+        $url = $campaign && !empty($campaign['continue_url']) ? $campaign['continue_url'] : $settings['continue_url'];
 
         return array(
             'one_time' => false,
@@ -232,7 +235,7 @@ class Termburg_VK_Promocodes_VK {
                         'action' => array(
                             'type' => 'open_link',
                             'link' => $url,
-                            'label' => 'Продолжить покупки',
+                            'label' => $settings['bot_button_continue'],
                         ),
                     ),
                 ),

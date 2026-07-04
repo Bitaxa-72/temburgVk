@@ -334,6 +334,9 @@ class Termburg_VK_Promocodes_Campaigns {
     }
 
     private static function issue_response($campaign, $promocode, $issued, $reused) {
+        $settings = Termburg_VK_Promocodes_Settings::get();
+        $template = $reused ? $settings['bot_existing_code_message'] : $settings['bot_code_message'];
+
         return array(
             'issued' => (bool) $issued,
             'reused' => (bool) $reused,
@@ -342,7 +345,7 @@ class Termburg_VK_Promocodes_Campaigns {
             'campaign_id' => intval($campaign['id']),
             'expires_at' => $promocode['expires_at'],
             'can_reissue_at' => $promocode['can_reissue_at'],
-            'message' => str_replace('{code}', $promocode['promo_code'], $reused ? $campaign['bot_existing_code_message'] : $campaign['bot_code_message']),
+            'message' => str_replace('{code}', $promocode['promo_code'], $template),
         );
     }
 

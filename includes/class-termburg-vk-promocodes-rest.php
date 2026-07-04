@@ -31,6 +31,24 @@ class Termburg_VK_Promocodes_REST {
             'callback' => array(__CLASS__, 'issue_promocode'),
             'permission_callback' => '__return_true',
         ));
+
+        register_rest_route(self::NS, '/bot/config', array(
+            'methods' => 'GET',
+            'callback' => array(__CLASS__, 'bot_config'),
+            'permission_callback' => '__return_true',
+        ));
+
+        register_rest_route(self::NS, '/bot/consent', array(
+            'methods' => 'POST',
+            'callback' => array(__CLASS__, 'bot_consent'),
+            'permission_callback' => '__return_true',
+        ));
+
+        register_rest_route(self::NS, '/bot/user-status', array(
+            'methods' => 'POST',
+            'callback' => array(__CLASS__, 'bot_user_status'),
+            'permission_callback' => '__return_true',
+        ));
     }
 
     public static function vk_callback($request) {
@@ -125,16 +143,7 @@ class Termburg_VK_Promocodes_REST {
         $params = $request->get_json_params();
         $params = is_array($params) ? $params : array();
 
-        if (empty($settings['vk_secret'])) {
-            return new WP_REST_Response(array(
-                'issued' => false,
-                'reason' => 'secret_missing',
-                'message' => 'Bot secret is not configured',
-            ), 403);
-        }
-
-        $param_secret = isset($params['secret']) ? (string) $params['secret'] : '';
-        if (!hash_equals($settings['vk_secret'], (string) $secret) && !hash_equals($settings['vk_secret'], $param_secret)) {
+        if (!self::bot_secret_allowed($settings, $secret, isset($params['secret']) ? (string) $params['secret'] : '')) {
             return new WP_REST_Response(array(
                 'issued' => false,
                 'reason' => 'forbidden',
@@ -142,9 +151,25 @@ class Termburg_VK_Promocodes_REST {
             ), 403);
         }
 
+        $vk_user_id = isset($params['vkUserId']) ? intval($params['vkUserId']) : 0;
+        $user = $vk_user_id ? Termburg_VK_Promocodes_DB::get_user($vk_user_id) : null;
+        $has_consent = $user && !empty($user['marketing_consent_at']) && empty($user['marketing_revoked_at']);
+        $is_member = $vk_user_id ? Termburg_VK_Promocodes_VK::is_group_member($vk_user_id) : false;
+
+        if (!$has_consent || !$is_member) {
+            return new WP_REST_Response(array(
+                'issued' => false,
+                'reason' => !$has_consent ? 'consent_missing' : 'subscription_missing',
+                'message' => !$has_consent ? $settings['bot_consent_text'] : $settings['bot_need_subscription'],
+                'messagesAllowed' => $user ? (bool) intval($user['messages_allowed']) : false,
+                'marketingConsent' => (bool) $has_consent,
+                'groupMember' => (bool) $is_member,
+            ), 200);
+        }
+
         $result = Termburg_VK_Promocodes_Campaigns::issue(
             isset($params['campaignId']) ? intval($params['campaignId']) : 0,
-            isset($params['vkUserId']) ? intval($params['vkUserId']) : 0,
+            $vk_user_id,
             array(
                 'vk_first_name' => isset($params['vkFirstName']) ? $params['vkFirstName'] : '',
                 'vk_last_name' => isset($params['vkLastName']) ? $params['vkLastName'] : '',
@@ -160,6 +185,132 @@ class Termburg_VK_Promocodes_REST {
         }
 
         return new WP_REST_Response($result, 200);
+    }
+
+    public static function bot_config($request) {
+        $settings = Termburg_VK_Promocodes_Settings::get();
+        $secret = $request->get_header('x-termburg-bot-secret');
+        $param_secret = (string) $request->get_param('secret');
+
+        if (!self::bot_secret_allowed($settings, $secret, $param_secret)) {
+            return new WP_REST_Response(array(
+                'reason' => 'forbidden',
+                'message' => 'Forbidden',
+            ), 403);
+        }
+
+        $campaign = Termburg_VK_Promocodes_Campaigns::get_active_campaign();
+
+        return new WP_REST_Response(array(
+            'callbackUrl' => rest_url('termburg-promocodes/v1/vk/callback'),
+            'issueUrl' => rest_url('termburg-promocodes/v1/promocodes/issue'),
+            'vk' => array(
+                'groupId' => $settings['vk_group_id'],
+                'groupSlug' => $settings['vk_group_slug'],
+                'apiVersion' => $settings['vk_api_version'],
+            ),
+            'campaign' => $campaign ? array(
+                'id' => intval($campaign['id']),
+                'name' => $campaign['name'],
+                'status' => $campaign['status'],
+            ) : null,
+            'texts' => array(
+                'intro' => $settings['bot_intro'],
+                'consent' => $settings['bot_consent_text'],
+                'needSubscription' => $settings['bot_need_subscription'],
+                'codeMessage' => $settings['bot_code_message'],
+                'existingCodeMessage' => $settings['bot_existing_code_message'],
+                'issueErrorMessage' => $settings['bot_issue_error_message'],
+                'noActiveCampaignMessage' => $settings['bot_no_active_campaign_message'],
+                'unsubscribeMessage' => $settings['bot_unsubscribe_message'],
+            ),
+            'buttons' => array(
+                'subscribe' => $settings['bot_button_subscribe'],
+                'consent' => $settings['bot_button_consent'],
+                'checkSubscription' => $settings['bot_button_check_subscription'],
+                'continue' => $settings['bot_button_continue'],
+            ),
+            'continueUrl' => $settings['continue_url'],
+            'consentTextVersion' => $settings['consent_text_version'],
+        ), 200);
+    }
+
+    public static function bot_consent($request) {
+        $settings = Termburg_VK_Promocodes_Settings::get();
+        $params = $request->get_json_params();
+        $params = is_array($params) ? $params : array();
+
+        if (!self::bot_secret_allowed($settings, $request->get_header('x-termburg-bot-secret'), isset($params['secret']) ? (string) $params['secret'] : '')) {
+            return new WP_REST_Response(array(
+                'saved' => false,
+                'reason' => 'forbidden',
+                'message' => 'Forbidden',
+            ), 403);
+        }
+
+        $vk_user_id = isset($params['vkUserId']) ? intval($params['vkUserId']) : 0;
+        if ($vk_user_id <= 0) {
+            return new WP_REST_Response(array(
+                'saved' => false,
+                'reason' => 'vk_user_missing',
+                'message' => 'VK пользователь не указан',
+            ), 200);
+        }
+
+        Termburg_VK_Promocodes_DB::upsert_user($vk_user_id, array(
+            'vk_first_name' => sanitize_text_field(isset($params['vkFirstName']) ? $params['vkFirstName'] : ''),
+            'vk_last_name' => sanitize_text_field(isset($params['vkLastName']) ? $params['vkLastName'] : ''),
+            'messages_allowed' => 1,
+            'marketing_consent_at' => current_time('mysql'),
+            'marketing_consent_text_version' => $settings['consent_text_version'],
+            'marketing_revoked_at' => null,
+        ));
+
+        return new WP_REST_Response(array(
+            'saved' => true,
+            'vkUserId' => $vk_user_id,
+            'consentTextVersion' => $settings['consent_text_version'],
+        ), 200);
+    }
+
+    public static function bot_user_status($request) {
+        $settings = Termburg_VK_Promocodes_Settings::get();
+        $params = $request->get_json_params();
+        $params = is_array($params) ? $params : array();
+
+        if (!self::bot_secret_allowed($settings, $request->get_header('x-termburg-bot-secret'), isset($params['secret']) ? (string) $params['secret'] : '')) {
+            return new WP_REST_Response(array(
+                'reason' => 'forbidden',
+                'message' => 'Forbidden',
+            ), 403);
+        }
+
+        $vk_user_id = isset($params['vkUserId']) ? intval($params['vkUserId']) : 0;
+        $user = $vk_user_id ? Termburg_VK_Promocodes_DB::get_user($vk_user_id) : null;
+        $is_member = $vk_user_id ? Termburg_VK_Promocodes_VK::is_group_member($vk_user_id) : false;
+        $has_consent = $user && !empty($user['marketing_consent_at']) && empty($user['marketing_revoked_at']);
+
+        if ($vk_user_id > 0) {
+            Termburg_VK_Promocodes_DB::upsert_user($vk_user_id, array(
+                'is_group_member' => $is_member ? 1 : 0,
+            ));
+        }
+
+        return new WP_REST_Response(array(
+            'vkUserId' => $vk_user_id,
+            'messagesAllowed' => $user ? (bool) intval($user['messages_allowed']) : false,
+            'marketingConsent' => (bool) $has_consent,
+            'groupMember' => (bool) $is_member,
+            'canIssue' => (bool) ($has_consent && $is_member),
+        ), 200);
+    }
+
+    private static function bot_secret_allowed($settings, $header_secret, $param_secret = '') {
+        if (empty($settings['vk_secret'])) {
+            return false;
+        }
+
+        return hash_equals($settings['vk_secret'], (string) $header_secret) || hash_equals($settings['vk_secret'], (string) $param_secret);
     }
 
     private static function dispatch_vk_event($type, $payload, $vk_user_id) {
