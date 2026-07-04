@@ -23,9 +23,13 @@ class Termburg_VK_Promocodes_Plugin {
     }
 
     private function __construct() {
+        add_action('init', array('Termburg_VK_Promocodes_DB', 'maybe_install'));
         add_action('rest_api_init', array('Termburg_VK_Promocodes_REST', 'register'));
         add_action('admin_menu', array($this, 'admin_menu'));
         add_action('admin_init', array($this, 'admin_init'));
+        add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
+        add_action('admin_post_termburg_vk_save_campaign', array($this, 'save_campaign'));
+        add_action('admin_post_termburg_vk_cancel_promocode', array($this, 'cancel_promocode'));
         add_action('woocommerce_order_status_processing', array($this, 'mark_order_paid'), 20);
         add_action('woocommerce_order_status_completed', array($this, 'mark_order_paid'), 20);
     }
@@ -40,6 +44,24 @@ class Termburg_VK_Promocodes_Plugin {
             'dashicons-megaphone',
             58
         );
+
+        add_submenu_page(
+            'termburg-vk-promocodes',
+            'Акции',
+            'Акции',
+            'manage_options',
+            'termburg-vk-campaigns',
+            array($this, 'render_campaigns_page')
+        );
+
+        add_submenu_page(
+            'termburg-vk-promocodes',
+            'Промокоды',
+            'Промокоды',
+            'manage_options',
+            'termburg-vk-issued-codes',
+            array($this, 'render_promocodes_page')
+        );
     }
 
     public function admin_init() {
@@ -52,6 +74,50 @@ class Termburg_VK_Promocodes_Plugin {
 
     public function mark_order_paid($order_id) {
         Termburg_VK_Promocodes_Coupons::mark_order_paid($order_id);
+    }
+
+    public function enqueue_admin_assets($hook) {
+        if (strpos((string) $hook, 'termburg-vk') === false) {
+            return;
+        }
+
+        wp_enqueue_script(
+            'termburg-vk-promocodes-admin',
+            TERMBURG_VK_PROMOCODES_URL . 'assets/admin.js',
+            array(),
+            TERMBURG_VK_PROMOCODES_VERSION,
+            true
+        );
+    }
+
+    public function save_campaign() {
+        if (!current_user_can('manage_options')) {
+            wp_die('Forbidden');
+        }
+
+        check_admin_referer('termburg_vk_save_campaign');
+        $campaign_id = Termburg_VK_Promocodes_Campaigns::save_campaign(isset($_POST['campaign']) ? wp_unslash($_POST['campaign']) : array());
+        wp_safe_redirect(add_query_arg(array(
+            'page' => 'termburg-vk-campaigns',
+            'campaign_id' => $campaign_id,
+            'updated' => '1',
+        ), admin_url('admin.php')));
+        exit;
+    }
+
+    public function cancel_promocode() {
+        if (!current_user_can('manage_options')) {
+            wp_die('Forbidden');
+        }
+
+        $promocode_id = isset($_POST['promocode_id']) ? intval($_POST['promocode_id']) : 0;
+        check_admin_referer('termburg_vk_cancel_promocode_' . $promocode_id);
+        Termburg_VK_Promocodes_Campaigns::cancel_promocode($promocode_id, isset($_POST['reason']) ? wp_unslash($_POST['reason']) : '');
+        wp_safe_redirect(add_query_arg(array(
+            'page' => 'termburg-vk-issued-codes',
+            'cancelled' => '1',
+        ), admin_url('admin.php')));
+        exit;
     }
 
     public function render_settings_page() {
@@ -260,5 +326,274 @@ class Termburg_VK_Promocodes_Plugin {
             </form>
         </div>
         <?php
+    }
+
+    public function render_campaigns_page() {
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+
+        Termburg_VK_Promocodes_Campaigns::ensure_default_campaign();
+        $campaign_id = isset($_GET['campaign_id']) ? intval($_GET['campaign_id']) : 0;
+        $campaign = $campaign_id ? Termburg_VK_Promocodes_Campaigns::get_campaign($campaign_id) : null;
+        $campaigns = Termburg_VK_Promocodes_Campaigns::list_campaigns();
+        $settings = Termburg_VK_Promocodes_Settings::get();
+        $groups = $this->product_groups();
+        $selected_groups = $campaign ? Termburg_VK_Promocodes_Campaigns::product_groups($campaign) : $settings['allowed_kinds'];
+        $form = $campaign ?: array(
+            'id' => 0,
+            'name' => '',
+            'slug' => '',
+            'status' => 'inactive',
+            'discount_type' => 'percent',
+            'discount_value' => '10',
+            'expires_in_days' => '0',
+            'is_lifetime' => '1',
+            'usage_limit' => '1',
+            'reissue_mode' => 'never',
+            'reissue_after_days' => '0',
+            'code_prefix' => 'VK',
+            'code_length' => '6',
+            'total_issue_limit' => '0',
+            'daily_issue_limit' => '0',
+            'continue_url' => $settings['continue_url'],
+            'consent_text_version' => $settings['consent_text_version'],
+            'bot_intro' => $settings['bot_intro'],
+            'bot_consent_text' => $settings['bot_consent_text'],
+            'bot_need_subscription' => $settings['bot_need_subscription'],
+            'bot_code_message' => $settings['bot_code_message'],
+            'bot_existing_code_message' => $settings['bot_existing_code_message'],
+        );
+        ?>
+        <div class="wrap">
+            <h1>Акции VK</h1>
+            <?php if (isset($_GET['updated'])) : ?>
+                <div class="notice notice-success"><p>Акция сохранена.</p></div>
+            <?php endif; ?>
+            <h2>Список акций</h2>
+            <table class="widefat striped">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Название</th>
+                        <th>Статус</th>
+                        <th>Скидка</th>
+                        <th>Срок</th>
+                        <th>Повторная выдача</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($campaigns as $item) : ?>
+                        <tr>
+                            <td><?php echo esc_html($item['id']); ?></td>
+                            <td><?php echo esc_html($item['name']); ?></td>
+                            <td><?php echo esc_html($item['status'] === 'active' ? 'Включена' : 'Выключена'); ?></td>
+                            <td><?php echo esc_html($item['discount_type'] === 'percent' ? $item['discount_value'] . '%' : $item['discount_value'] . ' ₽'); ?></td>
+                            <td><?php echo esc_html(intval($item['is_lifetime']) === 1 ? 'Бессрочно' : $item['expires_in_days'] . ' дн.'); ?></td>
+                            <td><?php echo esc_html($this->reissue_label($item['reissue_mode'], $item['reissue_after_days'])); ?></td>
+                            <td><a class="button" href="<?php echo esc_url(add_query_arg(array('page' => 'termburg-vk-campaigns', 'campaign_id' => intval($item['id'])), admin_url('admin.php'))); ?>">Редактировать</a></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+
+            <h2><?php echo $campaign ? 'Редактировать акцию' : 'Новая акция'; ?></h2>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                <?php wp_nonce_field('termburg_vk_save_campaign'); ?>
+                <input type="hidden" name="action" value="termburg_vk_save_campaign">
+                <input type="hidden" name="campaign[id]" value="<?php echo esc_attr($form['id']); ?>">
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row">Название</th>
+                        <td><input type="text" class="regular-text" name="campaign[name]" value="<?php echo esc_attr($form['name']); ?>" required></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Slug</th>
+                        <td><input type="text" class="regular-text" name="campaign[slug]" value="<?php echo esc_attr($form['slug']); ?>"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Статус</th>
+                        <td>
+                            <select name="campaign[status]">
+                                <option value="active" <?php selected($form['status'], 'active'); ?>>Включена</option>
+                                <option value="inactive" <?php selected($form['status'], 'inactive'); ?>>Выключена</option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Тип скидки</th>
+                        <td>
+                            <select name="campaign[discount_type]">
+                                <option value="percent" <?php selected($form['discount_type'], 'percent'); ?>>Процент</option>
+                                <option value="fixed" <?php selected($form['discount_type'], 'fixed'); ?>>Фиксированная сумма</option>
+                            </select>
+                            <input type="number" step="0.01" min="0" class="small-text" name="campaign[discount_value]" value="<?php echo esc_attr($form['discount_value']); ?>">
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Группы товаров</th>
+                        <td>
+                            <?php foreach ($groups as $group => $label) : ?>
+                                <label><input type="checkbox" name="campaign[product_groups][]" value="<?php echo esc_attr($group); ?>" <?php checked(in_array($group, $selected_groups, true)); ?>> <?php echo esc_html($label); ?></label><br>
+                            <?php endforeach; ?>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Срок действия</th>
+                        <td>
+                            <label><input type="checkbox" name="campaign[is_lifetime]" value="1" <?php checked(intval($form['is_lifetime']), 1); ?>> Бессрочно</label><br>
+                            <input type="number" min="0" class="small-text" name="campaign[expires_in_days]" value="<?php echo esc_attr($form['expires_in_days']); ?>"> дней
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Лимит применений</th>
+                        <td><input type="number" min="1" class="small-text" name="campaign[usage_limit]" value="<?php echo esc_attr($form['usage_limit']); ?>"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Повторная выдача</th>
+                        <td>
+                            <select name="campaign[reissue_mode]">
+                                <option value="never" <?php selected($form['reissue_mode'], 'never'); ?>>Никогда</option>
+                                <option value="after_days" <?php selected($form['reissue_mode'], 'after_days'); ?>>Через N дней</option>
+                                <option value="after_expiry" <?php selected($form['reissue_mode'], 'after_expiry'); ?>>После истечения</option>
+                            </select>
+                            <input type="number" min="0" class="small-text" name="campaign[reissue_after_days]" value="<?php echo esc_attr($form['reissue_after_days']); ?>"> дней
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Формат кода</th>
+                        <td>
+                            Префикс <input type="text" class="small-text" name="campaign[code_prefix]" value="<?php echo esc_attr($form['code_prefix']); ?>">
+                            Длина <input type="number" min="4" max="16" class="small-text" name="campaign[code_length]" value="<?php echo esc_attr($form['code_length']); ?>">
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Лимиты выдачи</th>
+                        <td>
+                            Всего <input type="number" min="0" class="small-text" name="campaign[total_issue_limit]" value="<?php echo esc_attr($form['total_issue_limit']); ?>">
+                            В день <input type="number" min="0" class="small-text" name="campaign[daily_issue_limit]" value="<?php echo esc_attr($form['daily_issue_limit']); ?>">
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Продолжить покупки URL</th>
+                        <td><input type="url" class="regular-text" name="campaign[continue_url]" value="<?php echo esc_attr($form['continue_url']); ?>"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Версия согласия</th>
+                        <td><input type="text" class="small-text" name="campaign[consent_text_version]" value="<?php echo esc_attr($form['consent_text_version']); ?>"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Первое сообщение</th>
+                        <td><textarea class="large-text" rows="2" name="campaign[bot_intro]"><?php echo esc_textarea($form['bot_intro']); ?></textarea></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Текст согласия</th>
+                        <td><textarea class="large-text" rows="2" name="campaign[bot_consent_text]"><?php echo esc_textarea($form['bot_consent_text']); ?></textarea></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Нет подписки</th>
+                        <td><textarea class="large-text" rows="2" name="campaign[bot_need_subscription]"><?php echo esc_textarea($form['bot_need_subscription']); ?></textarea></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Новый промокод</th>
+                        <td><textarea class="large-text" rows="2" name="campaign[bot_code_message]"><?php echo esc_textarea($form['bot_code_message']); ?></textarea></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Уже выдавался</th>
+                        <td><textarea class="large-text" rows="2" name="campaign[bot_existing_code_message]"><?php echo esc_textarea($form['bot_existing_code_message']); ?></textarea></td>
+                    </tr>
+                </table>
+                <?php submit_button('Сохранить акцию'); ?>
+            </form>
+        </div>
+        <?php
+    }
+
+    public function render_promocodes_page() {
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+
+        $campaign_id = isset($_GET['campaign_id']) ? intval($_GET['campaign_id']) : 0;
+        $promocodes = Termburg_VK_Promocodes_Campaigns::list_promocodes($campaign_id);
+        ?>
+        <div class="wrap">
+            <h1>Выданные промокоды</h1>
+            <?php if (isset($_GET['cancelled'])) : ?>
+                <div class="notice notice-success"><p>Промокод аннулирован.</p></div>
+            <?php endif; ?>
+            <table class="widefat striped">
+                <thead>
+                    <tr>
+                        <th>Код</th>
+                        <th>Акция</th>
+                        <th>VK</th>
+                        <th>Статус</th>
+                        <th>Выдан</th>
+                        <th>Истекает</th>
+                        <th>Применений</th>
+                        <th>Заказ</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($promocodes as $item) : ?>
+                        <tr>
+                            <td><strong><?php echo esc_html($item['promo_code']); ?></strong></td>
+                            <td><?php echo esc_html($item['campaign_name']); ?></td>
+                            <td>
+                                <a href="<?php echo esc_url('https://vk.com/id' . intval($item['vk_user_id'])); ?>" target="_blank" rel="noopener noreferrer">
+                                    <?php echo esc_html(trim($item['vk_first_name'] . ' ' . $item['vk_last_name']) ?: $item['vk_user_id']); ?>
+                                </a>
+                            </td>
+                            <td><?php echo esc_html(Termburg_VK_Promocodes_Campaigns::display_status($item)); ?></td>
+                            <td><?php echo esc_html($item['created_at']); ?></td>
+                            <td><?php echo esc_html($item['expires_at'] ?: 'Бессрочно'); ?></td>
+                            <td><?php echo esc_html(intval($item['usage_count']) . ' / ' . intval($item['usage_limit'])); ?></td>
+                            <td><?php echo $item['order_id'] ? esc_html($item['order_id']) : ''; ?></td>
+                            <td>
+                                <?php if ($item['status'] !== 'cancelled') : ?>
+                                    <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                                        <?php wp_nonce_field('termburg_vk_cancel_promocode_' . intval($item['id'])); ?>
+                                        <input type="hidden" name="action" value="termburg_vk_cancel_promocode">
+                                        <input type="hidden" name="promocode_id" value="<?php echo esc_attr($item['id']); ?>">
+                                        <input type="text" name="reason" value="" placeholder="Причина">
+                                        <?php submit_button('Аннулировать', 'delete small termburg-vk-cancel-submit', '', false); ?>
+                                    </form>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+        <?php
+    }
+
+    private function product_groups() {
+        return array(
+            'visit_ticket' => 'Входной билет',
+            'adult_ticket' => 'Взрослый билет',
+            'child_ticket' => 'Детский билет',
+            'service' => 'Услуги',
+            'certificate' => 'Сертификаты',
+            'subscription' => 'Абонементы',
+            'gift_box' => 'Подарочные боксы',
+            'merch' => 'Мерч',
+            'product' => 'Прочее',
+        );
+    }
+
+    private function reissue_label($mode, $days) {
+        if ($mode === 'after_days') {
+            return 'Через ' . intval($days) . ' дн.';
+        }
+
+        if ($mode === 'after_expiry') {
+            return 'После истечения';
+        }
+
+        return 'Никогда';
     }
 }

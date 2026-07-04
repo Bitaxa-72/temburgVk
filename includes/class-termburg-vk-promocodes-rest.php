@@ -25,6 +25,12 @@ class Termburg_VK_Promocodes_REST {
             'callback' => array(__CLASS__, 'widget'),
             'permission_callback' => '__return_true',
         ));
+
+        register_rest_route(self::NS, '/promocodes/issue', array(
+            'methods' => 'POST',
+            'callback' => array(__CLASS__, 'issue_promocode'),
+            'permission_callback' => '__return_true',
+        ));
     }
 
     public static function vk_callback($request) {
@@ -101,15 +107,59 @@ class Termburg_VK_Promocodes_REST {
 
     public static function widget() {
         $settings = Termburg_VK_Promocodes_Settings::get();
+        $campaign = Termburg_VK_Promocodes_Campaigns::get_active_campaign();
 
         return new WP_REST_Response(array(
-            'enabled' => $settings['campaign_enabled'] === '1' && $settings['widget_enabled'] === '1',
+            'enabled' => $campaign && $campaign['status'] === 'active' && $settings['widget_enabled'] === '1',
             'delay' => intval($settings['widget_delay']),
             'title' => $settings['widget_title'],
             'text' => $settings['widget_text'],
             'button' => $settings['widget_button'],
             'url' => 'https://vk.me/' . ($settings['vk_group_slug'] ?: 'termburg'),
         ), 200);
+    }
+
+    public static function issue_promocode($request) {
+        $settings = Termburg_VK_Promocodes_Settings::get();
+        $secret = $request->get_header('x-termburg-bot-secret');
+        $params = $request->get_json_params();
+        $params = is_array($params) ? $params : array();
+
+        if (empty($settings['vk_secret'])) {
+            return new WP_REST_Response(array(
+                'issued' => false,
+                'reason' => 'secret_missing',
+                'message' => 'Bot secret is not configured',
+            ), 403);
+        }
+
+        $param_secret = isset($params['secret']) ? (string) $params['secret'] : '';
+        if (!hash_equals($settings['vk_secret'], (string) $secret) && !hash_equals($settings['vk_secret'], $param_secret)) {
+            return new WP_REST_Response(array(
+                'issued' => false,
+                'reason' => 'forbidden',
+                'message' => 'Forbidden',
+            ), 403);
+        }
+
+        $result = Termburg_VK_Promocodes_Campaigns::issue(
+            isset($params['campaignId']) ? intval($params['campaignId']) : 0,
+            isset($params['vkUserId']) ? intval($params['vkUserId']) : 0,
+            array(
+                'vk_first_name' => isset($params['vkFirstName']) ? $params['vkFirstName'] : '',
+                'vk_last_name' => isset($params['vkLastName']) ? $params['vkLastName'] : '',
+            )
+        );
+
+        if (is_wp_error($result)) {
+            return new WP_REST_Response(array(
+                'issued' => false,
+                'reason' => $result->get_error_code(),
+                'message' => $result->get_error_message(),
+            ), 200);
+        }
+
+        return new WP_REST_Response($result, 200);
     }
 
     private static function dispatch_vk_event($type, $payload, $vk_user_id) {

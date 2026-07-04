@@ -17,6 +17,7 @@ define('TERMBURG_VK_PROMOCODES_URL', plugin_dir_url(__FILE__));
 
 require_once TERMBURG_VK_PROMOCODES_DIR . 'includes/class-termburg-vk-promocodes-db.php';
 require_once TERMBURG_VK_PROMOCODES_DIR . 'includes/class-termburg-vk-promocodes-settings.php';
+require_once TERMBURG_VK_PROMOCODES_DIR . 'includes/class-termburg-vk-promocodes-campaigns.php';
 require_once TERMBURG_VK_PROMOCODES_DIR . 'includes/class-termburg-vk-promocodes-coupons.php';
 require_once TERMBURG_VK_PROMOCODES_DIR . 'includes/class-termburg-vk-promocodes-vk.php';
 require_once TERMBURG_VK_PROMOCODES_DIR . 'includes/class-termburg-vk-promocodes-rest.php';
