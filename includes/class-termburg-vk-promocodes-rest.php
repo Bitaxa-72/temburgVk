@@ -26,6 +26,12 @@ class Termburg_VK_Promocodes_REST {
             'permission_callback' => '__return_true',
         ));
 
+        register_rest_route(self::NS, '/checkout/config', array(
+            'methods' => 'GET',
+            'callback' => array(__CLASS__, 'checkout_config'),
+            'permission_callback' => '__return_true',
+        ));
+
         register_rest_route(self::NS, '/promocodes/issue', array(
             'methods' => 'POST',
             'callback' => array(__CLASS__, 'issue_promocode'),
@@ -119,7 +125,23 @@ class Termburg_VK_Promocodes_REST {
             'totalAfterDiscount' => $result['total_after_discount'],
             'eligibleTotal' => $result['eligible_total'],
             'expiresAt' => $result['expires_at'],
+            'campaignId' => $result['campaign_id'],
+            'campaignName' => $result['campaign_name'],
+            'lineDiscounts' => $result['line_discounts'],
             'message' => 'Промокод применен',
+        ), 200);
+    }
+
+    public static function checkout_config() {
+        $settings = Termburg_VK_Promocodes_Settings::get();
+        $campaign = Termburg_VK_Promocodes_Campaigns::get_active_campaign();
+
+        return new WP_REST_Response(array(
+            'enabled' => $campaign && $campaign['status'] === 'active' && $settings['campaign_enabled'] === '1',
+            'label' => $settings['promo_field_label'],
+            'placeholder' => $settings['promo_field_placeholder'],
+            'button' => $settings['promo_field_button'],
+            'appliedText' => $settings['promo_field_applied_text'],
         ), 200);
     }
 

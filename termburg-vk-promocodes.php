@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Termburg VK Promocodes
  * Description: VK bot and WooCommerce promo codes for Termburg.
- * Version: 0.1.0
+ * Version: 0.2.0
  * Author: Termburg
  */
 
@@ -10,7 +10,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('TERMBURG_VK_PROMOCODES_VERSION', '0.1.0');
+define('TERMBURG_VK_PROMOCODES_VERSION', '0.2.0');
 define('TERMBURG_VK_PROMOCODES_FILE', __FILE__);
 define('TERMBURG_VK_PROMOCODES_DIR', plugin_dir_path(__FILE__));
 define('TERMBURG_VK_PROMOCODES_URL', plugin_dir_url(__FILE__));

@@ -341,6 +341,26 @@ class Termburg_VK_Promocodes_Plugin {
                     <?php endforeach; ?>
                 </fieldset>
 
+                <h2>Промокод при покупке</h2>
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row">Подпись поля</th>
+                        <td><input type="text" class="regular-text" name="<?php echo esc_attr($option); ?>[promo_field_label]" value="<?php echo esc_attr($settings['promo_field_label']); ?>"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Подсказка поля</th>
+                        <td><input type="text" class="regular-text" name="<?php echo esc_attr($option); ?>[promo_field_placeholder]" value="<?php echo esc_attr($settings['promo_field_placeholder']); ?>"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Кнопка</th>
+                        <td><input type="text" class="regular-text" name="<?php echo esc_attr($option); ?>[promo_field_button]" value="<?php echo esc_attr($settings['promo_field_button']); ?>"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Успешное применение</th>
+                        <td><input type="text" class="regular-text" name="<?php echo esc_attr($option); ?>[promo_field_applied_text]" value="<?php echo esc_attr($settings['promo_field_applied_text']); ?>"></td>
+                    </tr>
+                </table>
+
                 <h2>Виджет</h2>
                 <table class="form-table" role="presentation">
                     <tr>
